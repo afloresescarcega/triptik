@@ -4,7 +4,7 @@
   "private": true,
   "description": "Three-panel HN comment navigator.",
   "scripts": {
-    "build": "esbuild app.jsx --outfile=app.js --loader:.jsx=jsx --minify --sourcemap",
+    "build": "rm -rf dist && mkdir -p dist && esbuild app.jsx --outfile=dist/app.js --loader:.jsx=jsx --minify --sourcemap && cp index.html dist/",
     "dev": "esbuild app.jsx --outfile=app.js --loader:.jsx=jsx --watch --servedir=. --serve=127.0.0.1:5173"
   },
   "devDependencies": {
