@@ -1,4 +1,4 @@
-// app.jsx — Four-Square Navigator backed by the live Hacker News API.
+// app.jsx — triptik, a three-panel Hacker News comment navigator.
 //
 // HN API (Firebase, public, no auth, no documented rate limit):
 //   topstories.json      → array of story IDs (top ~500)
@@ -145,6 +145,20 @@ function cleanCommentText(html) {
     .replace(/<a [^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/gi, "$2 ($1)")
     .replace(/<[^>]+>/g, "");
   return decodeHtml(s).trim();
+}
+
+// ─── Viewport hook ──────────────────────────────────────────────────────────
+function useIsMobile() {
+  const get = () => typeof window !== "undefined" &&
+    (window.matchMedia("(max-width: 720px)").matches ||
+     window.matchMedia("(pointer: coarse)").matches && window.innerWidth < 900);
+  const [m, setM] = useState(get);
+  useEffect(() => {
+    const onResize = () => setM(get());
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return m;
 }
 
 // ─── React hook: fetch item ─────────────────────────────────────────────────
@@ -317,7 +331,7 @@ function LibraryScreen({ theme, onOpen, seen }) {
           fontFamily: theme.headFont, fontSize: 56, lineHeight: 1.0,
           margin: 0, marginBottom: 28, color: theme.ink, textWrap: "balance",
         }}>
-          Four-Square Navigator
+          triptik
         </h1>
 
         {error && <div style={{ color: theme.accent, padding: 12 }}>Failed to load HN: {String(error.message || error)}</div>}
@@ -430,6 +444,7 @@ function StoryCard({ id, theme, selected, rank, seen, onSelect, onOpen }) {
 // ─── Navigator ──────────────────────────────────────────────────────────────
 // `path` is an array of HN ids: [storyId, commentId, ...] from root to current.
 function Navigator({ storyId, theme, tweaks, seen, setSeen, onExit }) {
+  const isMobile = useIsMobile();
   const PATH_KEY = `fsq:path:${storyId}`;
   const [path, setPath] = useState(() => {
     try { const raw = localStorage.getItem(PATH_KEY); if (raw) return JSON.parse(raw); } catch {}
@@ -562,7 +577,10 @@ function Navigator({ storyId, theme, tweaks, seen, setSeen, onExit }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [descendFocused, ascend, goLeft, goRight, guardedExit]);
 
-  // Touch swipe.
+  // Touch swipe — container handles HORIZONTAL only (page siblings).
+  // Vertical gestures live on individual cells:
+  //   parent cell → swipe-down ascends (with scrollTop guard)
+  //   child cells → tap descends, long-press previews
   const touchRef = useRef(null);
   const onTouchStart = (e) => {
     const t = e.touches[0];
@@ -570,14 +588,15 @@ function Navigator({ storyId, theme, tweaks, seen, setSeen, onExit }) {
   };
   const onTouchEnd = (e) => {
     const s = touchRef.current; if (!s) return;
+    touchRef.current = null;
     const t = e.changedTouches[0];
     const dx = t.clientX - s.x, dy = t.clientY - s.y;
     const ax = Math.abs(dx), ay = Math.abs(dy);
-    if (Math.max(ax, ay) < 50) return;
-    if (ax > ay) (dx < 0 ? goRight() : goLeft());
-    else         (dy < 0 ? descendFocused() : ascend());
-    touchRef.current = null;
+    if (ax < 50 || ax < ay * 1.4) return; // horizontal-dominant only
+    if (dx < 0) goRight(); else goLeft();
   };
+
+  const [preview, setPreview] = useState(null); // node being long-press previewed
 
   // Jump (used by breadcrumb).
   const jumpTo = useCallback((newPath) => {
@@ -612,10 +631,12 @@ function Navigator({ storyId, theme, tweaks, seen, setSeen, onExit }) {
           anim={anim} animKey={animKey}
           focus={focus} setFocus={setFocus}
           seen={seen}
+          isMobile={isMobile}
           onDescendLeft={() => descendInto(leftChildId)}
           onDescendRight={() => descendInto(rightChildId)}
           onAscend={ascend}
           onPrev={goLeft} onNext={goRight}
+          onPreview={setPreview}
         />
       </div>
 
@@ -654,6 +675,10 @@ function Navigator({ storyId, theme, tweaks, seen, setSeen, onExit }) {
           </div>
         </div>
       )}
+
+      {preview && (
+        <PreviewOverlay node={preview} theme={theme} onClose={() => setPreview(null)} />
+      )}
     </div>
   );
 }
@@ -663,49 +688,152 @@ function Grid({
   theme, tweaks,
   current, parent, path, childIds, leftChild, rightChild, leftId, rightId,
   pairStart, page, numPairs, anim, animKey,
-  focus, setFocus, seen,
-  onDescendLeft, onDescendRight, onAscend, onPrev, onNext,
+  focus, setFocus, seen, isMobile,
+  onDescendLeft, onDescendRight, onAscend, onPrev, onNext, onPreview,
 }) {
   const animate = tweaks.animateTransitions;
+  const padding = isMobile ? 8 : 16;
+  // Mobile: 1+2 stack, parent gets ~55% of height. Desktop: equal quarters.
+  const rows = isMobile ? "1.25fr 1fr" : "1fr 1fr";
   return (
     <div key={animKey} style={{
-      position: "absolute", inset: 0, padding: 16,
-      display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr", gap: tweaks.gap,
+      position: "absolute", inset: 0, padding,
+      display: "grid", gridTemplateColumns: "1fr 1fr",
+      gridTemplateRows: rows, gap: isMobile ? Math.min(tweaks.gap, 6) : tweaks.gap,
     }}>
-      <div style={{ gridColumn: "1 / -1", animation: animate ? animEnterTop(anim) : "none" }}>
+      <ParentSlot animate={animate} anim={anim} isMobile={isMobile}
+                  canAscend={path.length > 1} onAscend={onAscend}>
         <Cell theme={theme} node={current} role="current"
-              showUpChevron={path.length > 1} onUp={onAscend} />
-      </div>
+              showUpChevron={path.length > 1} onUp={onAscend}
+              isMobile={isMobile} />
+      </ParentSlot>
 
-      <div onMouseEnter={() => leftId && setFocus("left")}
-           style={{ animation: animate ? animEnterChild(anim, "left") : "none" }}>
+      <ChildSlot side="left" animate={animate} anim={anim}
+        focusOnEnter={() => leftId && setFocus("left")}
+        onLongPress={leftChild ? () => onPreview(leftChild) : null}
+        isMobile={isMobile}
+      >
         {leftId ? (
           <Cell theme={theme} node={leftChild} role="child"
-                onDescend={onDescendLeft} focused={focus === "left"}
-                seen={seen}
+                onDescend={onDescendLeft} focused={!isMobile && focus === "left"}
+                seen={seen} isMobile={isMobile}
                 orderLabel={`reply ${pairStart + 1} of ${childIds.length}`}/>
         ) : (
           <EmptyCell theme={theme} label={path.length === 1 ? "no comments yet" : "no replies"} />
         )}
-      </div>
+      </ChildSlot>
 
-      <div onMouseEnter={() => rightId && setFocus("right")}
-           style={{ animation: animate ? animEnterChild(anim, "right") : "none" }}>
+      <ChildSlot side="right" animate={animate} anim={anim}
+        focusOnEnter={() => rightId && setFocus("right")}
+        onLongPress={rightChild ? () => onPreview(rightChild) : null}
+        isMobile={isMobile}
+      >
         {rightId ? (
           <Cell theme={theme} node={rightChild} role="child"
-                onDescend={onDescendRight} focused={focus === "right"}
-                seen={seen}
+                onDescend={onDescendRight} focused={!isMobile && focus === "right"}
+                seen={seen} isMobile={isMobile}
                 orderLabel={`reply ${pairStart + 2} of ${childIds.length}`}/>
         ) : leftId ? (
           <EmptyCell theme={theme} label={childIds.length === 1 ? "only one reply" : "end of siblings"} />
         ) : (
           <EmptyCell theme={theme} label="—" dim />
         )}
-      </div>
+      </ChildSlot>
 
       {childIds.length > 2 && (
         <PairDots theme={theme} numPairs={numPairs} page={page} onPrev={onPrev} onNext={onNext}/>
       )}
+    </div>
+  );
+}
+
+// Parent slot: on mobile, swipe-down ascends but only when the inner cell
+// is scrolled to the top (so in-cell scrolling never gets hijacked).
+function ParentSlot({ children, animate, anim, isMobile, canAscend, onAscend }) {
+  const startRef = useRef(null);
+  const ref = useRef(null);
+  if (!isMobile) {
+    return (
+      <div style={{ gridColumn: "1 / -1", animation: animate ? animEnterTop(anim) : "none" }}>
+        {children}
+      </div>
+    );
+  }
+  // Find the scrollable inner element (the cell body) at touch start.
+  const scrollerAtTop = () => {
+    const root = ref.current; if (!root) return true;
+    // Find first element with overflow auto/scroll inside.
+    const scroller = root.querySelector('[data-cell-body="1"]');
+    return !scroller || scroller.scrollTop <= 0;
+  };
+  const onTouchStart = (e) => {
+    const t = e.touches[0];
+    startRef.current = { x: t.clientX, y: t.clientY, atTop: scrollerAtTop() };
+  };
+  const onTouchEnd = (e) => {
+    const s = startRef.current; if (!s) return;
+    startRef.current = null;
+    if (!canAscend || !s.atTop) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - s.x, dy = t.clientY - s.y;
+    if (dy > 60 && Math.abs(dy) > Math.abs(dx) * 1.4 && scrollerAtTop()) {
+      onAscend();
+    }
+  };
+  return (
+    <div ref={ref}
+         onTouchStart={onTouchStart}
+         onTouchEnd={onTouchEnd}
+         style={{ gridColumn: "1 / -1", animation: animate ? animEnterTop(anim) : "none" }}>
+      {children}
+    </div>
+  );
+}
+
+// Child slot: long-press shows preview overlay (on mobile).
+function ChildSlot({ children, side, animate, anim, focusOnEnter, onLongPress, isMobile }) {
+  const timerRef = useRef(null);
+  const movedRef = useRef(false);
+  const startRef = useRef(null);
+  const firedRef = useRef(false);
+
+  const handlers = isMobile && onLongPress ? {
+    onTouchStart: (e) => {
+      const t = e.touches[0];
+      startRef.current = { x: t.clientX, y: t.clientY };
+      movedRef.current = false;
+      firedRef.current = false;
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => {
+        if (!movedRef.current) {
+          firedRef.current = true;
+          if (navigator.vibrate) try { navigator.vibrate(15); } catch {}
+          onLongPress();
+        }
+      }, 480);
+    },
+    onTouchMove: (e) => {
+      const s = startRef.current; if (!s) return;
+      const t = e.touches[0];
+      if (Math.hypot(t.clientX - s.x, t.clientY - s.y) > 10) {
+        movedRef.current = true;
+        if (timerRef.current) clearTimeout(timerRef.current);
+      }
+    },
+    onTouchEnd: () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    },
+    // If long-press fired, swallow the click that follows.
+    onClickCapture: (e) => {
+      if (firedRef.current) { e.stopPropagation(); e.preventDefault(); firedRef.current = false; }
+    },
+  } : {};
+
+  return (
+    <div onMouseEnter={focusOnEnter}
+         {...handlers}
+         style={{ animation: animate ? animEnterChild(anim, side) : "none" }}>
+      {children}
     </div>
   );
 }
@@ -723,7 +851,7 @@ function animEnterChild(anim, side) {
 }
 
 // ─── Cell ────────────────────────────────────────────────────────────────────
-function Cell({ theme, node, role, onDescend, onUp, showUpChevron, focused, seen, orderLabel }) {
+function Cell({ theme, node, role, onDescend, onUp, showUpChevron, focused, seen, orderLabel, isMobile }) {
   const isCurrent = role === "current";
   const [hover, setHover] = useState(false);
   const isHot = hover || focused;
@@ -754,12 +882,16 @@ function Cell({ theme, node, role, onDescend, onUp, showUpChevron, focused, seen
       }}
     >
       <CellHeader theme={theme} node={node} role={role} orderLabel={orderLabel}
-                  showUpChevron={showUpChevron} onUp={onUp} />
-      <div style={{
+                  showUpChevron={showUpChevron} onUp={onUp} isMobile={isMobile} />
+      <div data-cell-body="1" style={{
         flex: 1, overflowY: "auto",
-        padding: isCurrent ? "18px 24px 24px" : "14px 18px 18px",
+        padding: isCurrent
+          ? (isMobile ? "12px 14px 14px" : "18px 24px 24px")
+          : (isMobile ? "10px 12px 12px" : "14px 18px 18px"),
         lineHeight: 1.45,
-        fontSize: isStory ? (isCurrent ? 22 : 17) : (isCurrent ? 19 : 15.5),
+        fontSize: isStory
+          ? (isCurrent ? (isMobile ? 17 : 22) : (isMobile ? 14 : 17))
+          : (isCurrent ? (isMobile ? 16 : 19) : (isMobile ? 13.5 : 15.5)),
         fontFamily: theme.bodyFont, color: theme.ink,
       }}>
         {!node ? (
@@ -782,15 +914,17 @@ function Cell({ theme, node, role, onDescend, onUp, showUpChevron, focused, seen
   );
 }
 
-function CellHeader({ theme, node, role, orderLabel, showUpChevron, onUp }) {
+function CellHeader({ theme, node, role, orderLabel, showUpChevron, onUp, isMobile }) {
   const isCurrent = role === "current";
   const isStory = node && node.type === "story";
   return (
     <div style={{
-      display: "flex", alignItems: "center", gap: 10,
-      padding: isCurrent ? "12px 20px" : "10px 16px",
+      display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+      padding: isCurrent
+        ? (isMobile ? "8px 12px" : "12px 20px")
+        : (isMobile ? "6px 10px" : "10px 16px"),
       borderBottom: `1px ${theme.strokeStyle} ${theme.ink}`,
-      fontFamily: theme.monoFont, fontSize: 11, letterSpacing: "0.04em",
+      fontFamily: theme.monoFont, fontSize: isMobile ? 10 : 11, letterSpacing: "0.04em",
       textTransform: "uppercase", color: theme.inkSoft, flexShrink: 0,
     }}>
       {isCurrent && showUpChevron && (
@@ -856,8 +990,9 @@ function StoryBody({ node, theme, isCurrent }) {
   return (
     <div>
       <h1 style={{
-        fontFamily: theme.headFont, fontSize: isCurrent ? 44 : 30,
-        lineHeight: 1.05, margin: 0, marginBottom: 14, color: theme.ink, textWrap: "balance",
+        fontFamily: theme.headFont,
+        fontSize: `clamp(22px, ${isCurrent ? "5.2vw" : "3.8vw"}, ${isCurrent ? 44 : 30}px)`,
+        lineHeight: 1.05, margin: 0, marginBottom: 12, color: theme.ink, textWrap: "balance",
         letterSpacing: theme.variant === "mono" ? "-0.02em" : "0",
       }}>
         {node.title}
@@ -878,6 +1013,83 @@ function StoryBody({ node, theme, isCurrent }) {
       {node.text && (
         <p style={{ margin: 0, textWrap: "pretty" }}>{cleanCommentText(node.text)}</p>
       )}
+    </div>
+  );
+}
+
+// ─── Long-press preview overlay ─────────────────────────────────────────────
+function PreviewOverlay({ node, theme, onClose }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  const isStory = node && node.type === "story";
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 100,
+        background: "rgba(0,0,0,0.45)",
+        display: "flex", alignItems: "flex-end", justifyContent: "center",
+        animation: "fadeIn 180ms ease-out",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: theme.bg, color: theme.ink,
+          width: "100%", maxWidth: 720, maxHeight: "85vh",
+          border: `${theme.borderStyle} ${theme.ink}`, borderStyle: theme.strokeStyle,
+          borderRadius: `${theme.cellRadius * 2}px ${theme.cellRadius * 2}px 0 0`,
+          boxShadow: theme.variant !== "mono" ? `0 -8px 0 ${theme.accent}` : "none",
+          display: "flex", flexDirection: "column",
+          animation: "slideFromBelow 240ms cubic-bezier(.2,.7,.2,1)",
+        }}
+      >
+        <div style={{
+          display: "flex", alignItems: "center", gap: 10,
+          padding: "10px 16px",
+          borderBottom: `1px ${theme.strokeStyle} ${theme.ink}`,
+          fontFamily: theme.monoFont, fontSize: 11, letterSpacing: "0.06em",
+          textTransform: "uppercase", color: theme.inkSoft,
+        }}>
+          <span style={{ color: theme.accent, fontWeight: 600 }}>preview</span>
+          <span>·</span>
+          <span>{node.by || "anon"}</span>
+          <span>·</span>
+          <span>{relTime(node.time)}</span>
+          <button onClick={onClose} style={{
+            marginLeft: "auto",
+            background: "none", border: `1px ${theme.strokeStyle} ${theme.ink}`,
+            color: theme.ink, fontFamily: theme.monoFont, fontSize: 11,
+            padding: "4px 10px", borderRadius: theme.cellRadius, cursor: "pointer",
+            letterSpacing: "0.06em", textTransform: "uppercase",
+          }}>close</button>
+        </div>
+        <div style={{
+          flex: 1, overflowY: "auto", padding: "16px 20px 24px",
+          fontFamily: theme.bodyFont, fontSize: 17, lineHeight: 1.5,
+        }}>
+          {isStory ? (
+            <StoryBody node={node} theme={theme} isCurrent />
+          ) : (
+            <div style={{ whiteSpace: "pre-wrap", textWrap: "pretty" }}>
+              {cleanCommentText(node.text)}
+            </div>
+          )}
+        </div>
+        <div style={{
+          padding: "8px 16px 12px",
+          borderTop: `1px ${theme.strokeStyle} ${theme.ink}`,
+          fontFamily: theme.monoFont, fontSize: 10.5,
+          letterSpacing: "0.06em", textTransform: "uppercase", color: theme.inkSoft,
+          display: "flex", justifyContent: "space-between",
+        }}>
+          <span>{(node.kids || []).length} replies below</span>
+          <span style={{ color: theme.inkFaint }}>tap outside or esc to dismiss</span>
+        </div>
+      </div>
     </div>
   );
 }

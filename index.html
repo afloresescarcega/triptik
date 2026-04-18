@@ -3,7 +3,13 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Four-Square Navigator · HN</title>
+  <title>triptik · three-panel HN</title>
+  <meta name="description" content="A three-panel navigator for Hacker News comment threads."/>
+  <meta property="og:title" content="triptik"/>
+  <meta property="og:description" content="A three-panel navigator for Hacker News comment threads."/>
+  <meta property="og:type" content="website"/>
+  <meta name="theme-color" content="#f4f0e6"/>
+  <link rel="icon" href="data:image/svg+xml,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'&gt;&lt;text y='.9em' font-size='90'&gt;▦&lt;/text&gt;&lt;/svg&gt;"/>
 
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -32,10 +38,9 @@
 <body>
   <div id="root"></div>
 
-  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
-  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
-  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
 
-  <script type="text/babel" src="app.jsx?v=1"></script>
+  <script src="app.js"></script>
 </body>
 </html>
